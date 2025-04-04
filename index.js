@@ -25,7 +25,11 @@ const supabase = createClient(
   process.env.VITE_SUPABASE_ANON_KEY
 );
 
-app.use(cors());
+app.use(cors({ 
+  origin: "https://localhost2.netlify.app", 
+  methods: ["GET", "POST"], 
+  credentials: true 
+}));
 app.use(express.json());
 
 // Heartbeat endpoint
