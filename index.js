@@ -4,18 +4,19 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import { dirname } from 'path';
-import path from 'path'; // Add this line
+import path from 'path';
+
 dotenv.config();
 
 const app = express();
 
-app.use(express.static( 'dist'));
+app.use(express.static('dist'));
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: "https://localhost2.netlify.app",
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -25,7 +26,11 @@ const supabase = createClient(
   process.env.VITE_SUPABASE_ANON_KEY
 );
 
-app.use(cors());
+app.use(cors({
+  origin: "https://localhost2.netlify.app",
+  methods: ["GET", "POST"],
+  credentials: true
+}));
 app.use(express.json());
 
 // Heartbeat endpoint
@@ -154,7 +159,7 @@ io.on('connection', (socket) => {
 });
 
 // Start server
-const PORT = process.env.PORT ||3000
+const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
