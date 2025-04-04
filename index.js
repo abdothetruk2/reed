@@ -5,6 +5,7 @@ import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
+import { io } from 'socket.io-client';
 
 dotenv.config();
 
@@ -12,7 +13,7 @@ const app = express();
 
 app.use(express.static('dist'));
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
+const ioServer = new Server(httpServer, {
   cors: {
     origin: "https://localhost2.netlify.app",
     methods: ["GET", "POST"],
@@ -73,7 +74,7 @@ app.get('/api/users', async (req, res) => {
 });
 
 // Socket.IO connection handling
-io.on('connection', (socket) => {
+ioServer.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   // Handle joining chat
@@ -108,13 +109,13 @@ io.on('connection', (socket) => {
         
         socket.username = newUsername;
         socket.userId = newUser.id;
-        io.emit('user_joined', newUser);
+        ioServer.emit('user_joined', newUser);
         return;
       }
       
       socket.username = data.username;
       socket.userId = data.id;
-      io.emit('user_joined', data);
+      ioServer.emit('user_joined', data);
     } catch (error) {
       socket.emit('error', error.message);
     }
@@ -134,7 +135,7 @@ io.on('connection', (socket) => {
 
       if (error) throw error;
       
-      io.emit('new_message', data);
+      ioServer.emit('new_message', data);
     } catch (error) {
       socket.emit('error', error.message);
     }
@@ -149,13 +150,48 @@ io.on('connection', (socket) => {
           .update({ last_seen: new Date().toISOString() })
           .eq('id', socket.userId);
 
-        io.emit('user_left', { userId: socket.userId });
+        ioServer.emit('user_left', { userId: socket.userId });
       } catch (error) {
         console.error('Error updating last_seen:', error);
       }
     }
     console.log('User disconnected:', socket.id);
   });
+});
+
+// Socket.IO Client Setup
+const SOCKET_URL = 'https://localhost2.netlify.app';
+export const socket = io(SOCKET_URL, {
+  autoConnect: false,
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000
+});
+
+export const connectSocket = (username) => {
+  if (!socket.connected) {
+    socket.connect();
+    socket.emit('join', username);
+  }
+};
+
+export const disconnectSocket = () => {
+  if (socket.connected) {
+    socket.disconnect();
+  }
+};
+
+// Socket event listeners
+socket.on('connect', () => {
+  console.log('Connected to server');
+});
+
+socket.on('disconnect', () => {
+  console.log('Disconnected from server');
+});
+
+socket.on('error', (error) => {
+  console.error('Socket error:', error);
 });
 
 // Start server
