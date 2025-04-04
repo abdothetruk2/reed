@@ -1,6 +1,10 @@
 import { io } from 'socket.io-client';
 
+<<<<<<< HEAD
 const SOCKET_URL = 'https://localhost2.netlify.app:3000';
+=======
+const SOCKET_URL = 'https://localhost2.netlify.app/';
+>>>>>>> b229c68 (initial)
 
 export const socket = io(SOCKET_URL, {
   autoConnect: false,
