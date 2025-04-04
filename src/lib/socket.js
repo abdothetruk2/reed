@@ -1,11 +1,8 @@
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = 'reed-nu.vercel.app';
+const SOCKET_URL = 'https://reed-nu.vercel.app';
 export const socket = io(SOCKET_URL, {
-  autoConnect: false,
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000
+  transports: ["websocket"]
 });
 
 export const connectSocket = (username) => {
