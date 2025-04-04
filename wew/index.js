@@ -14,7 +14,7 @@ app.use(express.static( 'dist'));
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "https://mero21.netlify.app",
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
