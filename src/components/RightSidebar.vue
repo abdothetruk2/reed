@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { UserCircleIcon, XMarkIcon } from '@heroicons/vue/24/outline';
-import { supabase } from '../lib/supabase';
 import { socket } from '../lib/socket';
 
 const joinedUsers = ref([]);
@@ -16,31 +15,14 @@ const onlineUsers = computed(() => {
 });
 
 const loadJoinedUsers = async () => {
-  const { data, error } = await supabase
-    .from('chat_users')
-    .select('*')
-    .order('last_seen', { ascending: false });
-
-  if (error) {
+  try {
+    // Replace with an API call to fetch users
+    const response = await fetch('/api/users');
+    const data = await response.json();
+    joinedUsers.value = data || [];
+  } catch (error) {
     console.error('Error loading users:', error);
-    return;
   }
-
-  joinedUsers.value = data;
-};
-
-const removeUser = async (userId) => {
-  const { error } = await supabase
-    .from('chat_users')
-    .delete()
-    .eq('id', userId);
-
-  if (error) {
-    console.error('Error removing user:', error);
-    return;
-  }
-
-  joinedUsers.value = joinedUsers.value.filter(user => user.id !== userId);
 };
 
 const getTimeAgo = (date) => {
@@ -113,12 +95,6 @@ onUnmounted(() => {
               <p class="text-xs text-green-600">Online</p>
             </div>
           </div>
-          <button
-            @click="removeUser(user.id)"
-            class="p-1.5 rounded-full hover:bg-red-50 group transition-colors"
-          >
-            <XMarkIcon class="h-5 w-5 text-gray-400 group-hover:text-red-500" />
-          </button>
         </div>
       </div>
 
@@ -130,7 +106,7 @@ onUnmounted(() => {
             v-for="user in joinedUsers.filter(u => !onlineUsers.includes(u))" 
             :key="user.id"
             class="flex items-center justify-between p-3 bg-white/50 rounded-lg"
-          >
+          >                                                                       
             <div class="flex items-center space-x-3">
               <div class="relative">
                 <UserCircleIcon class="h-10 w-10 text-gray-400" />
@@ -141,12 +117,6 @@ onUnmounted(() => {
                 <p class="text-xs text-gray-400">Last seen {{ getTimeAgo(user.last_seen) }}</p>
               </div>
             </div>
-            <button
-              @click="removeUser(user.id)"
-              class="p-1.5 rounded-full hover:bg-red-50 group transition-colors"
-            >
-              <XMarkIcon class="h-5 w-5 text-gray-300 group-hover:text-red-500" />
-            </button>
           </div>
         </div>
       </div>

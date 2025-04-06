@@ -2,163 +2,203 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import { dirname } from 'path';
-import path from 'path'; // Add this line
+import path from 'path';
+import multer from 'multer';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { MongoClient } from 'mongodb';
+
 dotenv.config();
 
+// Fix for __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Initialize Express app
 const app = express();
-
-app.use(express.static( 'dist'));
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+
+// MongoDB client and db
+let client;
+let db;
+
+const connectToMongo = async () => {
+  try {
+    const uri = process.env.MONGODB_URI || "mongodb://localhost:27017";
+    client = new MongoClient(uri);
+    await client.connect();
+    db = client.db('chat_app');
+    console.log('✅ Connected to MongoDB');
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err);
+    process.exit(1);
   }
+};
+
+// Create uploads folder if it doesn’t exist
+const uploadDir = path.join(__dirname, 'dist/uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Configure Multer for file uploads
+const upload = multer({
+  dest: 'uploads/',
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
 });
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
-);
-
-app.use(cors());
+// Middleware
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'PUT'],
+  credentials: true
+}));
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'dist')));
+app.use('/uploads', express.static(path.join(__dirname, 'dist/uploads')));
 
-// Heartbeat endpoint
+// Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', dbStatus: db ? 'connected' : 'disconnected' });
 });
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "/dist/index.html"));
+// Serve index.html
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist/index.html'));
 });
 
-// Get all messages
+// Get messages
 app.get('/api/messages', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*, chat_users(username)')
-      .order('created_at', { ascending: true });
+    const messages = await db.collection('messages').aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: '$user' },
+      { $sort: { createdAt: 1 } },
+      {
+        $project: {
+          content: 1,
+          createdAt: 1,
+          imageUrl: 1,
+          'user.username': 1
+        }
+      }
+    ]).toArray();
 
-    if (error) throw error;
-    res.json(data);
+    res.json(messages);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get all users
+// Get users
 app.get('/api/users', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('chat_users')
-      .select('*')
-      .order('last_seen', { ascending: false });
-
-    if (error) throw error;
-    res.json(data);
+    const users = await db.collection('users').find().sort({ lastSeen: -1 }).toArray();
+    res.json(users);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+// Upload endpoint
+app.post('/api/upload', upload.single('image'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  // Handle joining chat
-  socket.on('join', async (username) => {
-    try {
-      // Try to upsert the user with the given username
-      const { data, error } = await supabase
-        .from('chat_users')
-        .upsert({ 
-          username,
-          last_seen: new Date().toISOString()
-        }, {
-          onConflict: 'username',
-          ignoreDuplicates: false
-        })
-        .select()
-        .single();
+  try {
+    const imageUrl = `/uploads/${req.file.filename}`;
+    fs.renameSync(req.file.path, path.join(uploadDir, req.file.filename));
+    res.json({ imageUrl });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-      if (error) {
-        // If there's a conflict, generate a new unique username
-        const newUsername = `${username}_${Math.random().toString(36).substring(2, 5)}`;
-        const { data: newUser, error: retryError } = await supabase
-          .from('chat_users')
-          .insert([{ 
-            username: newUsername,
-            last_seen: new Date().toISOString()
-          }])
-          .select()
-          .single();
+// Socket.IO
+const io = new Server(httpServer, {
+  cors: {
+    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
 
-        if (retryError) throw retryError;
-        
-        socket.username = newUsername;
-        socket.userId = newUser.id;
-        io.emit('user_joined', newUser);
-        return;
-      }
-      
-      socket.username = data.username;
-      socket.userId = data.id;
-      io.emit('user_joined', data);
-    } catch (error) {
-      socket.emit('error', error.message);
-    }
-  });
+// Connect to DB then start Socket.io
+connectToMongo().then(() => {
+  io.on('connection', async (socket) => {
+    console.log('🔌 User connected:', socket.id);
 
-  // Handle chat messages
-  socket.on('chat_message', async (message) => {
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .insert({
-          content: message,
-          user_id: socket.userId
-        })
-        .select('*, chat_users(username)')
-        .single();
-
-      if (error) throw error;
-      
-      io.emit('new_message', data);
-    } catch (error) {
-      socket.emit('error', error.message);
-    }
-  });
-
-  // Handle user disconnection
-  socket.on('disconnect', async () => {
-    if (socket.userId) {
+    socket.on('join', async (username) => {
       try {
-        await supabase
-          .from('chat_users')
-          .update({ last_seen: new Date().toISOString() })
-          .eq('id', socket.userId);
+        let user = await db.collection('users').findOne({ username });
 
-        io.emit('user_left', { userId: socket.userId });
+        if (!user) {
+          const result = await db.collection('users').insertOne({ username, lastSeen: new Date() });
+          user = { _id: result.insertedId, username, lastSeen: new Date() };
+        }
+
+        socket.username = user.username;
+        socket.userId = user._id;
+
+        io.emit('user_joined', user);
       } catch (error) {
-        console.error('Error updating last_seen:', error);
+        socket.emit('error', error.message);
       }
-    }
-    console.log('User disconnected:', socket.id);
+    });
+
+    socket.on('chat_message', async ({ content, imageUrl }) => {
+      try {
+        const message = {
+          content,
+          userId: socket.userId,
+          createdAt: new Date(),
+          imageUrl: imageUrl || null
+        };
+
+        const result = await db.collection('messages').insertOne(message);
+        const insertedMessage = {
+          ...message,
+          _id: result.insertedId,
+          user: { username: socket.username }
+        };
+
+        io.emit('new_message', insertedMessage);
+      } catch (error) {
+        socket.emit('error', error.message);
+      }
+    });
+
+    socket.on('disconnect', async () => {
+      if (socket.userId) {
+        try {
+          await db.collection('users').updateOne(
+            { _id: socket.userId },
+            { $set: { lastSeen: new Date() } }
+          );
+          io.emit('user_left', { userId: socket.userId });
+        } catch (error) {
+          console.error('Error updating lastSeen:', error);
+        }
+      }
+      console.log('❌ User disconnected:', socket.id);
+    });
+  });
+
+  const PORT = process.env.PORT || 3000;
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
 });
 
-// Start server
-
-const PORT = process.env.PORT ||  3000;
-
-
-
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  if (client) await client.close();
+  process.exit();
 });
