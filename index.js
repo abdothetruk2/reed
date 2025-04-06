@@ -124,7 +124,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 // Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    origin: https://reed.fly.dev,
     methods: ['GET', 'POST'],
     credentials: true
   }
